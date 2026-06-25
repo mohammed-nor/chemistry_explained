@@ -27,7 +27,26 @@ class MoleculeCanvasPainter extends CustomPainter {
     }
   }
 
-  void _drawBond(Canvas canvas, Offset a, Offset b, BondType type, Paint paint) {
+  /// Count total bond order attached to an atom.
+  int _bondOrderFor(String atomId) {
+    int total = 0;
+    for (final b in bonds) {
+      if (b.fromId == atomId || b.toId == atomId) {
+        switch (b.type) {
+          case BondType.single:
+            total += 1;
+          case BondType.double:
+            total += 2;
+          case BondType.triple:
+            total += 3;
+        }
+      }
+    }
+    return total;
+  }
+
+  void _drawBond(
+      Canvas canvas, Offset a, Offset b, BondType type, Paint paint) {
     final dx = b.dx - a.dx;
     final dy = b.dy - a.dy;
     final len = sqrt(dx * dx + dy * dy);
@@ -84,12 +103,12 @@ class MoleculeCanvasPainter extends CustomPainter {
       _drawBond(canvas, from.position, to.position, bond.type, bondPaint);
     }
 
-    // Preview bond line (while dragging from selected atom)
+    // Preview bond line
     if (selectedAtomId != null && previewLineEnd != null) {
       final sel = _atomById(selectedAtomId!);
       if (sel != null) {
         final previewPaint = Paint()
-          ..color = const Color(0xFF00C8FF).withOpacity(0.5)
+          ..color = const Color(0xFF00C8FF).withValues(alpha: 0.5)
           ..strokeWidth = 1.5
           ..strokeCap = StrokeCap.round
           ..style = PaintingStyle.stroke;
@@ -103,12 +122,25 @@ class MoleculeCanvasPainter extends CustomPainter {
       final isHovered = atom.id == hoveredAtomId;
       const radius = 16.0;
 
+      // Check if over-bonded
+      final maxBonds = kMaxBonds[atom.symbol] ?? 4;
+      final currentBondOrder = _bondOrderFor(atom.id);
+      final isOverBonded = currentBondOrder > maxBonds + atom.charge.abs();
+
       // Glow for selected
       if (isSelected) {
         final glowPaint = Paint()
-          ..color = const Color(0xFF00C8FF).withOpacity(0.18)
+          ..color = const Color(0xFF00C8FF).withValues(alpha: 0.18)
           ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
         canvas.drawCircle(atom.position, radius + 6, glowPaint);
+      }
+
+      // Over-bond warning glow
+      if (isOverBonded) {
+        final warnGlow = Paint()
+          ..color = const Color(0xFFFF5252).withValues(alpha: 0.15)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 8);
+        canvas.drawCircle(atom.position, radius + 4, warnGlow);
       }
 
       // Background circle
@@ -122,11 +154,13 @@ class MoleculeCanvasPainter extends CustomPainter {
 
       // Border
       final borderPaint = Paint()
-        ..color = isSelected
-            ? const Color(0xFF00C8FF)
-            : isHovered
-                ? atom.color.withOpacity(0.9)
-                : atom.color.withOpacity(0.6)
+        ..color = isOverBonded
+            ? const Color(0xFFFF5252)
+            : isSelected
+                ? const Color(0xFF00C8FF)
+                : isHovered
+                    ? atom.color.withValues(alpha: 0.9)
+                    : atom.color.withValues(alpha: 0.6)
         ..strokeWidth = isSelected ? 1.8 : 1.2
         ..style = PaintingStyle.stroke;
       canvas.drawCircle(atom.position, radius, borderPaint);
@@ -149,6 +183,42 @@ class MoleculeCanvasPainter extends CustomPainter {
         canvas,
         atom.position - Offset(tp.width / 2, tp.height / 2),
       );
+
+      // ── Charge badge ──────────────────────────────────────────────────
+      if (atom.charge != 0) {
+        final chargeLabel =
+            atom.charge > 0 ? '+${atom.charge}' : '${atom.charge}';
+        final chargeColor =
+            atom.charge > 0 ? const Color(0xFF64B5F6) : const Color(0xFFEF5350);
+
+        // Badge circle
+        final badgeCenter =
+            atom.position + const Offset(12, -12);
+        final badgeBg = Paint()..color = const Color(0xFF111111);
+        canvas.drawCircle(badgeCenter, 7, badgeBg);
+        final badgeBorder = Paint()
+          ..color = chargeColor
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.0;
+        canvas.drawCircle(badgeCenter, 7, badgeBorder);
+
+        final chTp = TextPainter(
+          text: TextSpan(
+            text: chargeLabel,
+            style: TextStyle(
+              color: chargeColor,
+              fontSize: 8,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          textDirection: TextDirection.ltr,
+        );
+        chTp.layout();
+        chTp.paint(
+          canvas,
+          badgeCenter - Offset(chTp.width / 2, chTp.height / 2),
+        );
+      }
     }
   }
 
