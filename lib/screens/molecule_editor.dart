@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import '../models/molecule_model.dart';
+import '../models/retrosynthesis.dart';
 import '../painters/canvas_painter.dart';
 
 // ─── History snapshot ────────────────────────────────────────────────────────
@@ -18,17 +19,20 @@ class _Snapshot {
   factory _Snapshot.capture(List<Atom> atoms, List<Bond> bonds, int nextId) {
     return _Snapshot(
       atoms: atoms
-          .map((a) => Atom(
-                id: a.id,
-                symbol: a.symbol,
-                position: a.position,
-                color: a.color,
-                charge: a.charge,
-              ))
+          .map(
+            (a) => Atom(
+              id: a.id,
+              symbol: a.symbol,
+              position: a.position,
+              color: a.color,
+              charge: a.charge,
+            ),
+          )
           .toList(),
       bonds: bonds
-          .map((b) =>
-              Bond(id: b.id, fromId: b.fromId, toId: b.toId, type: b.type))
+          .map(
+            (b) => Bond(id: b.id, fromId: b.fromId, toId: b.toId, type: b.type),
+          )
           .toList(),
       nextId: nextId,
     );
@@ -38,7 +42,14 @@ class _Snapshot {
 // ─── Molecule Editor Screen ──────────────────────────────────────────────────
 
 class MoleculeEditorScreen extends StatefulWidget {
-  const MoleculeEditorScreen({super.key});
+  final ThemeMode themeMode;
+  final ValueChanged<bool>? onThemeChanged;
+
+  const MoleculeEditorScreen({
+    super.key,
+    this.themeMode = ThemeMode.dark,
+    this.onThemeChanged,
+  });
 
   @override
   State<MoleculeEditorScreen> createState() => _MoleculeEditorScreenState();
@@ -46,6 +57,19 @@ class MoleculeEditorScreen extends StatefulWidget {
 
 class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
     with TickerProviderStateMixin {
+  bool get _isDarkTheme => widget.themeMode == ThemeMode.dark;
+
+  Color get _appBackground =>
+      _isDarkTheme ? const Color(0xFF0E0E0E) : const Color(0xFFF3F5F8);
+  Color get _panelBackground =>
+      _isDarkTheme ? const Color(0xFF111111) : const Color(0xFFE9EEF5);
+  Color get _panelBorder =>
+      _isDarkTheme ? const Color(0xFF1E1E1E) : const Color(0xFFD5DCE7);
+  Color get _canvasBackground =>
+      _isDarkTheme ? const Color(0xFF0D0D0D) : const Color(0xFFF2F4F7);
+  Color get _mutedText =>
+      _isDarkTheme ? const Color(0xFF555555) : const Color(0xFF5D6978);
+
   // ── Molecule state ─────────────────────────────────────────────────────────
   final List<Atom> _atoms = [];
   final List<Bond> _bonds = [];
@@ -64,6 +88,7 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
   String? _draggingAtomId;
   Offset _dragStart = Offset.zero;
   _Snapshot? _preDragSnapshot;
+  Size _canvasSize = const Size(800, 600);
 
   // ── Tool mode ──────────────────────────────────────────────────────────────
   String _mode = 'draw';
@@ -79,15 +104,43 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
   List<SavedMolecule> _savedMolecules = [];
   bool _showSavedPanel = false;
 
+  // ── Retrosynthesis panel ───────────────────────────────────────────────────
+  bool _retrosynthesisExpanded = false;
+  bool _showFunctionalGroups = true;
+  RetrosynthesisAnalysis? _retrosynthesisAnalysis;
+
   @override
   void initState() {
     super.initState();
     _loadSavedList();
+    _ensureDefaultDemoMolecule();
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
   // PERSISTENCE
   // ═══════════════════════════════════════════════════════════════════════════
+
+  Future<void> _ensureDefaultDemoMolecule() async {
+    try {
+      final dir = await _saveDir();
+      final files = dir
+          .listSync()
+          .whereType<File>()
+          .where((f) => f.path.endsWith('.moldraw.json'))
+          .toList();
+
+      if (files.isNotEmpty) return;
+
+      final demo = SavedMolecule.paracetamolDemo();
+      final file = File(
+        '${dir.path}/Paracetamol_${DateTime.now().millisecondsSinceEpoch}.moldraw.json',
+      );
+      await file.writeAsString(demo.encode());
+      await _loadSavedList();
+      if (!mounted) return;
+      _loadMolecule(demo);
+    } catch (_) {}
+  }
 
   Future<Directory> _saveDir() async {
     final appDir = await getApplicationDocumentsDirectory();
@@ -105,7 +158,8 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
           .where((f) => f.path.endsWith('.moldraw.json'))
           .toList();
       files.sort(
-          (a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+        (a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()),
+      );
       final list = <SavedMolecule>[];
       for (final f in files) {
         try {
@@ -121,34 +175,37 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
       name: name,
       timestamp: DateTime.now().toIso8601String(),
       atoms: _atoms
-          .map((a) => Atom(
-                id: a.id,
-                symbol: a.symbol,
-                position: a.position,
-                color: a.color,
-                charge: a.charge,
-              ))
+          .map(
+            (a) => Atom(
+              id: a.id,
+              symbol: a.symbol,
+              position: a.position,
+              color: a.color,
+              charge: a.charge,
+            ),
+          )
           .toList(),
       bonds: _bonds
-          .map((b) =>
-              Bond(id: b.id, fromId: b.fromId, toId: b.toId, type: b.type))
+          .map(
+            (b) => Bond(id: b.id, fromId: b.fromId, toId: b.toId, type: b.type),
+          )
           .toList(),
       nextId: _nextId,
     );
     final dir = await _saveDir();
     final safeName = name.replaceAll(RegExp(r'[^a-zA-Z0-9_\- ]'), '');
     final file = File(
-        '${dir.path}/${safeName}_${DateTime.now().millisecondsSinceEpoch}.moldraw.json');
+      '${dir.path}/${safeName}_${DateTime.now().millisecondsSinceEpoch}.moldraw.json',
+    );
     await file.writeAsString(mol.encode());
     await _loadSavedList();
   }
 
   Future<void> _deleteSaved(SavedMolecule mol) async {
     final dir = await _saveDir();
-    final files = dir
-        .listSync()
-        .whereType<File>()
-        .where((f) => f.path.endsWith('.moldraw.json'));
+    final files = dir.listSync().whereType<File>().where(
+      (f) => f.path.endsWith('.moldraw.json'),
+    );
     for (final f in files) {
       try {
         final decoded = SavedMolecule.decode(await f.readAsString());
@@ -166,17 +223,24 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
     setState(() {
       _atoms
         ..clear()
-        ..addAll(mol.atoms.map((a) => Atom(
+        ..addAll(
+          mol.atoms.map(
+            (a) => Atom(
               id: a.id,
               symbol: a.symbol,
               position: a.position,
               color: a.color,
               charge: a.charge,
-            )));
+            ),
+          ),
+        );
       _bonds
         ..clear()
-        ..addAll(mol.bonds.map((b) =>
-            Bond(id: b.id, fromId: b.fromId, toId: b.toId, type: b.type)));
+        ..addAll(
+          mol.bonds.map(
+            (b) => Bond(id: b.id, fromId: b.fromId, toId: b.toId, type: b.type),
+          ),
+        );
       _nextId = mol.nextId;
       _selectedAtomId = null;
       _previewEnd = null;
@@ -189,13 +253,34 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
 
   void _exportSmiles() {
     final smiles = generateSmiles(_atoms, _bonds);
+    final isDark = _isDarkTheme;
+    final dialogBg = isDark ? const Color(0xFF161616) : const Color(0xFFFFFFFF);
+    final borderColor = isDark
+        ? const Color(0xFF2A2A2A)
+        : const Color(0xFFD7DDE7);
+    final fieldBg = isDark ? const Color(0xFF0E0E0E) : const Color(0xFFF2F4F7);
+    final sectionText = isDark
+        ? const Color(0xFF999999)
+        : const Color(0xFF5F6F86);
+    final bodyText = isDark ? const Color(0xFFEEEEEE) : const Color(0xFF1F2937);
+    final emptyText = isDark
+        ? const Color(0xFF444444)
+        : const Color(0xFF7A8699);
+    final accent = const Color(0xFF00C8FF);
+    final subtleText = isDark
+        ? const Color(0xFF666666)
+        : const Color(0xFF475569);
+    final snackBarBg = isDark
+        ? const Color(0xFF1E1E1E)
+        : const Color(0xFF111827);
+
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
-        backgroundColor: const Color(0xFF161616),
+        backgroundColor: dialogBg,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: Color(0xFF2A2A2A)),
+          side: BorderSide(color: borderColor),
         ),
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -203,27 +288,28 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('SMILES',
-                  style: TextStyle(
-                      color: Color(0xFF999999),
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.5)),
+              Text(
+                'SMILES',
+                style: TextStyle(
+                  color: sectionText,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.5,
+                ),
+              ),
               const SizedBox(height: 12),
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0E0E0E),
-                  border: Border.all(color: const Color(0xFF2A2A2A)),
+                  color: fieldBg,
+                  border: Border.all(color: borderColor),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: SelectableText(
                   smiles.isEmpty ? '(empty molecule)' : smiles,
                   style: TextStyle(
-                    color: smiles.isEmpty
-                        ? const Color(0xFF444444)
-                        : const Color(0xFF00C8FF),
+                    color: smiles.isEmpty ? emptyText : accent,
                     fontSize: 14,
                     fontFamily: 'monospace',
                   ),
@@ -237,21 +323,21 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: smiles));
                       Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                        content: const Text('SMILES copied to clipboard'),
-                        backgroundColor: const Color(0xFF1E1E1E),
-                        behavior: SnackBarBehavior.floating,
-                        duration: const Duration(seconds: 2),
-                      ));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: const Text('SMILES copied to clipboard'),
+                          backgroundColor: snackBarBg,
+                          behavior: SnackBarBehavior.floating,
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
                     },
-                    child: const Text('Copy',
-                        style: TextStyle(color: Color(0xFF00C8FF))),
+                    child: Text('Copy', style: TextStyle(color: accent)),
                   ),
                   const SizedBox(width: 8),
                   TextButton(
                     onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Close',
-                        style: TextStyle(color: Color(0xFF666666))),
+                    child: Text('Close', style: TextStyle(color: subtleText)),
                   ),
                 ],
               ),
@@ -262,19 +348,60 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
     );
   }
 
+  Widget _retrosynthesisInfoRow(String label, String value) {
+    return RichText(
+      text: TextSpan(
+        text: '$label: ',
+        style: const TextStyle(
+          color: Color(0xFF9E9E9E),
+          fontSize: 12,
+          fontWeight: FontWeight.w600,
+        ),
+        children: [
+          TextSpan(
+            text: value,
+            style: const TextStyle(
+              color: Color(0xFF9E9E9E),
+              fontSize: 12,
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // SAVE DIALOG
   // ═══════════════════════════════════════════════════════════════════════════
 
   void _showSaveDialog() {
     final controller = TextEditingController();
+    final isDark = _isDarkTheme;
+    final dialogBg = isDark ? const Color(0xFF161616) : const Color(0xFFFFFFFF);
+    final borderColor = isDark
+        ? const Color(0xFF2A2A2A)
+        : const Color(0xFFD7DDE7);
+    final fieldBg = isDark ? const Color(0xFF0E0E0E) : const Color(0xFFF2F4F7);
+    final sectionText = isDark
+        ? const Color(0xFF999999)
+        : const Color(0xFF5F6F86);
+    final inputText = isDark
+        ? const Color(0xFFEEEEEE)
+        : const Color(0xFF1F2937);
+    final hintText = isDark ? const Color(0xFF444444) : const Color(0xFF7A8699);
+    final secondaryText = isDark
+        ? const Color(0xFF666666)
+        : const Color(0xFF475569);
+    final accent = const Color(0xFF00C8FF);
+
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
-        backgroundColor: const Color(0xFF161616),
+        backgroundColor: dialogBg,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: const BorderSide(color: Color(0xFF2A2A2A)),
+          side: BorderSide(color: borderColor),
         ),
         child: Padding(
           padding: const EdgeInsets.all(24),
@@ -282,36 +409,41 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text('SAVE MOLECULE',
-                  style: TextStyle(
-                      color: Color(0xFF999999),
-                      fontSize: 10,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: 1.5)),
+              Text(
+                'SAVE MOLECULE',
+                style: TextStyle(
+                  color: sectionText,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.5,
+                ),
+              ),
               const SizedBox(height: 16),
               TextField(
                 controller: controller,
                 autofocus: true,
-                style: const TextStyle(color: Color(0xFFEEEEEE), fontSize: 14),
+                style: TextStyle(color: inputText, fontSize: 14),
                 decoration: InputDecoration(
                   hintText: 'Molecule name…',
-                  hintStyle: const TextStyle(color: Color(0xFF444444)),
+                  hintStyle: TextStyle(color: hintText),
                   filled: true,
-                  fillColor: const Color(0xFF0E0E0E),
+                  fillColor: fieldBg,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFF2A2A2A)),
+                    borderSide: BorderSide(color: borderColor),
                   ),
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Color(0xFF2A2A2A)),
+                    borderSide: BorderSide(color: borderColor),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(8),
                     borderSide: const BorderSide(color: Color(0xFF00C8FF)),
                   ),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
+                  ),
                 ),
                 onSubmitted: (v) {
                   if (v.trim().isNotEmpty) {
@@ -326,8 +458,10 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Cancel',
-                        style: TextStyle(color: Color(0xFF666666))),
+                    child: Text(
+                      'Cancel',
+                      style: TextStyle(color: secondaryText),
+                    ),
                   ),
                   const SizedBox(width: 8),
                   TextButton(
@@ -338,8 +472,7 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
                         Navigator.pop(ctx);
                       }
                     },
-                    child: const Text('Save',
-                        style: TextStyle(color: Color(0xFF00C8FF))),
+                    child: Text('Save', style: TextStyle(color: accent)),
                   ),
                 ],
               ),
@@ -420,12 +553,14 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
   void _addAtom(Offset pos) {
     _pushUndo();
     setState(() {
-      _atoms.add(Atom(
-        id: _newId(),
-        symbol: _selectedAtomSymbol,
-        position: pos,
-        color: _selectedAtomColor,
-      ));
+      _atoms.add(
+        Atom(
+          id: _newId(),
+          symbol: _selectedAtomSymbol,
+          position: pos,
+          color: _selectedAtomColor,
+        ),
+      );
     });
   }
 
@@ -440,14 +575,16 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
     if (existing.isNotEmpty) {
       final bond = existing.first;
       setState(() {
-        bond.type = BondType.values[
-            (BondType.values.indexOf(bond.type) + 1) % BondType.values.length];
+        bond.type =
+            BondType.values[(BondType.values.indexOf(bond.type) + 1) %
+                BondType.values.length];
       });
       return;
     }
     setState(() {
       _bonds.add(
-          Bond(id: _newBondId(), fromId: fromId, toId: toId, type: _bondType));
+        Bond(id: _newBondId(), fromId: fromId, toId: toId, type: _bondType),
+      );
     });
   }
 
@@ -460,34 +597,41 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
         if (fa.localId == frag.anchorLocalId) continue;
         final newId = _newId();
         localToGlobal[fa.localId] = newId;
-        _atoms.add(Atom(
-          id: newId,
-          symbol: fa.symbol,
-          position: anchor.position + fa.relativeOffset,
-          color: fa.color,
-        ));
+        _atoms.add(
+          Atom(
+            id: newId,
+            symbol: fa.symbol,
+            position: anchor.position + fa.relativeOffset,
+            color: fa.color,
+          ),
+        );
       }
-      final nonAnchor =
-          frag.atoms.where((a) => a.localId != frag.anchorLocalId);
+      final nonAnchor = frag.atoms.where(
+        (a) => a.localId != frag.anchorLocalId,
+      );
       if (nonAnchor.isNotEmpty) {
         final firstLocalId = nonAnchor.first.localId;
-        _bonds.add(Bond(
-          id: _newBondId(),
-          fromId: anchor.id,
-          toId: localToGlobal[firstLocalId]!,
-          type: BondType.single,
-        ));
+        _bonds.add(
+          Bond(
+            id: _newBondId(),
+            fromId: anchor.id,
+            toId: localToGlobal[firstLocalId]!,
+            type: BondType.single,
+          ),
+        );
       }
       for (final fb in frag.bonds) {
         final fromGlobal = localToGlobal[fb.fromLocalId];
         final toGlobal = localToGlobal[fb.toLocalId];
         if (fromGlobal != null && toGlobal != null) {
-          _bonds.add(Bond(
-            id: _newBondId(),
-            fromId: fromGlobal,
-            toId: toGlobal,
-            type: fb.type,
-          ));
+          _bonds.add(
+            Bond(
+              id: _newBondId(),
+              fromId: fromGlobal,
+              toId: toGlobal,
+              type: fb.type,
+            ),
+          );
         }
       }
     });
@@ -500,23 +644,27 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
       for (final fa in frag.atoms) {
         final newId = _newId();
         localToGlobal[fa.localId] = newId;
-        _atoms.add(Atom(
-          id: newId,
-          symbol: fa.symbol,
-          position: center + fa.relativeOffset,
-          color: fa.color,
-        ));
+        _atoms.add(
+          Atom(
+            id: newId,
+            symbol: fa.symbol,
+            position: center + fa.relativeOffset,
+            color: fa.color,
+          ),
+        );
       }
       for (final fb in frag.bonds) {
         final fromGlobal = localToGlobal[fb.fromLocalId];
         final toGlobal = localToGlobal[fb.toLocalId];
         if (fromGlobal != null && toGlobal != null) {
-          _bonds.add(Bond(
-            id: _newBondId(),
-            fromId: fromGlobal,
-            toId: toGlobal,
-            type: fb.type,
-          ));
+          _bonds.add(
+            Bond(
+              id: _newBondId(),
+              fromId: fromGlobal,
+              toId: toGlobal,
+              type: fb.type,
+            ),
+          );
         }
       }
     });
@@ -545,6 +693,11 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
     if (_atoms.isEmpty) return;
     _pushUndo();
 
+    final canvasCenter = Offset(
+      _canvasSize.width > 0 ? _canvasSize.width / 2 : 400,
+      _canvasSize.height > 0 ? _canvasSize.height / 2 : 300,
+    );
+
     // Preserve initial center of mass
     Offset initialCenter = Offset.zero;
     for (final a in _atoms) {
@@ -560,12 +713,12 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
 
     // We'll store velocities for each atom
     final Map<String, Offset> velocities = {
-      for (final a in _atoms) a.id: Offset.zero
+      for (final a in _atoms) a.id: Offset.zero,
     };
 
     // Build adjacency list for angular forces
     final Map<String, List<String>> neighbors = {
-      for (final a in _atoms) a.id: []
+      for (final a in _atoms) a.id: [],
     };
     for (final b in _bonds) {
       neighbors[b.fromId]?.add(b.toId);
@@ -578,7 +731,7 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
       final double temp = (1.0 - (step / iterations)) * 10.0;
 
       final Map<String, Offset> forces = {
-        for (final a in _atoms) a.id: Offset.zero
+        for (final a in _atoms) a.id: Offset.zero,
       };
 
       // 1. Repulsive forces between all pairs of atoms (to prevent overlap)
@@ -608,8 +761,14 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
 
       // 2. Attractive forces along bonds (to maintain standard bond length)
       for (final b in _bonds) {
-        final a1 = _atoms.firstWhere((a) => a.id == b.fromId, orElse: () => _atoms[0]);
-        final a2 = _atoms.firstWhere((a) => a.id == b.toId, orElse: () => _atoms[0]);
+        final a1 = _atoms.firstWhere(
+          (a) => a.id == b.fromId,
+          orElse: () => _atoms[0],
+        );
+        final a2 = _atoms.firstWhere(
+          (a) => a.id == b.toId,
+          orElse: () => _atoms[0],
+        );
         if (a1.id == a2.id) continue;
 
         final delta = a1.position - a2.position;
@@ -671,13 +830,13 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
       }
     }
 
-    // Centering: translate all atoms back so the center of mass matches initialCenter
+    // Centering: move the finished structure to the canvas center.
     Offset newCenter = Offset.zero;
     for (final a in _atoms) {
       newCenter += a.position;
     }
     newCenter = newCenter / _atoms.length.toDouble();
-    final translation = initialCenter - newCenter;
+    final translation = canvasCenter - newCenter;
     setState(() {
       for (final a in _atoms) {
         a.position += translation;
@@ -687,10 +846,10 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
 
   void _addHydrogens() {
     _pushUndo();
-    
+
     final List<Atom> newAtoms = [];
     final List<Bond> newBonds = [];
-    
+
     int tempNextId = _nextId;
     String getTempId() => 'a${tempNextId++}';
     String getTempBondId() => 'b${tempNextId++}';
@@ -704,7 +863,11 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
         return max(0, 3 + charge);
       } else if (symbol == 'O' || symbol == 'S') {
         return max(0, 2 + charge);
-      } else if (symbol == 'H' || symbol == 'F' || symbol == 'Cl' || symbol == 'Br' || symbol == 'I') {
+      } else if (symbol == 'H' ||
+          symbol == 'F' ||
+          symbol == 'Cl' ||
+          symbol == 'Br' ||
+          symbol == 'I') {
         return max(0, 1 - charge.abs());
       }
       return neutralValence;
@@ -741,21 +904,26 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
 
       for (final angle in angles) {
         final hId = getTempId();
-        final hPos = atom.position + Offset(cos(angle), sin(angle)) * hBondLength;
-        
-        newAtoms.add(Atom(
-          id: hId,
-          symbol: 'H',
-          position: hPos,
-          color: const Color(0xFF888888),
-        ));
-        
-        newBonds.add(Bond(
-          id: getTempBondId(),
-          fromId: atom.id,
-          toId: hId,
-          type: BondType.single,
-        ));
+        final hPos =
+            atom.position + Offset(cos(angle), sin(angle)) * hBondLength;
+
+        newAtoms.add(
+          Atom(
+            id: hId,
+            symbol: 'H',
+            position: hPos,
+            color: const Color(0xFF888888),
+          ),
+        );
+
+        newBonds.add(
+          Bond(
+            id: getTempBondId(),
+            fromId: atom.id,
+            toId: hId,
+            type: BondType.single,
+          ),
+        );
       }
     }
 
@@ -768,12 +936,20 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
     }
   }
 
-  List<double> _getHydrogenAngles(Atom parent, List<Atom> allAtoms, List<Bond> allBonds, int needed) {
+  List<double> _getHydrogenAngles(
+    Atom parent,
+    List<Atom> allAtoms,
+    List<Bond> allBonds,
+    int needed,
+  ) {
     final List<double> existingAngles = [];
     for (final b in allBonds) {
       if (b.fromId == parent.id || b.toId == parent.id) {
         final otherId = b.fromId == parent.id ? b.toId : b.fromId;
-        final other = allAtoms.firstWhere((a) => a.id == otherId, orElse: () => parent);
+        final other = allAtoms.firstWhere(
+          (a) => a.id == otherId,
+          orElse: () => parent,
+        );
         if (other.id != parent.id) {
           final diff = other.position - parent.position;
           existingAngles.add(atan2(diff.dy, diff.dx));
@@ -938,16 +1114,23 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0E0E0E),
+      backgroundColor: _appBackground,
       body: Column(
         children: [
           _buildTopBar(),
           Expanded(
-            child: Row(
+            child: Column(
               children: [
-                _buildPalette(),
-                Expanded(child: _buildCanvas()),
-                if (_showSavedPanel) _buildSavedPanel(),
+                Expanded(
+                  child: Row(
+                    children: [
+                      _buildPalette(),
+                      Expanded(child: _buildCanvas()),
+                      if (_showSavedPanel) _buildSavedPanel(),
+                    ],
+                  ),
+                ),
+                _buildRetrosynthesisPanel(context),
               ],
             ),
           ),
@@ -967,11 +1150,11 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
 
     return Container(
       height: 50,
-      decoration: const BoxDecoration(
-        color: Color(0xFF111111),
-        border: Border(bottom: BorderSide(color: Color(0xFF1E1E1E))),
+      decoration: BoxDecoration(
+        color: _panelBackground,
+        border: Border(bottom: BorderSide(color: _panelBorder)),
       ),
-      padding: const EdgeInsets.symmetric(horizontal: 16),
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
         children: [
           // ── Mode buttons ────────────────────────────────────────────────
@@ -983,22 +1166,15 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
           _divider(),
           const SizedBox(width: 6),
 
-          // ── Bond-type chips ─────────────────────────────────────────────
-          if (_mode == 'draw' && _selectedFragment == null) ...[
-            _bondChip('–', BondType.single),
-            const SizedBox(width: 4),
-            _bondChip('=', BondType.double),
-            const SizedBox(width: 4),
-            _bondChip('≡', BondType.triple),
-          ],
-
           // ── Charge buttons (visible when atom selected) ────────────────
           if (hasSelection) ...[
             const SizedBox(width: 6),
             _divider(),
             const SizedBox(width: 6),
-            const Text('Charge',
-                style: TextStyle(color: Color(0xFF444444), fontSize: 10)),
+            const Text(
+              'Charge',
+              style: TextStyle(color: Color(0xFF444444), fontSize: 10),
+            ),
             const SizedBox(width: 6),
             _chargeBtn('−', -1),
             const SizedBox(width: 2),
@@ -1014,7 +1190,7 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
             enabled: canUndo,
             onTap: _undo,
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 2),
           _iconBtn(
             icon: Icons.redo_rounded,
             tooltip: 'Redo',
@@ -1022,9 +1198,9 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
             onTap: _redo,
           ),
 
-          const SizedBox(width: 8),
+          const SizedBox(width: 2),
           _divider(),
-          const SizedBox(width: 8),
+          const SizedBox(width: 2),
 
           // ── Clean / Hydrogens ───────────────────────────────────────────
           _iconBtn(
@@ -1034,7 +1210,7 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
             onTap: _cleanStructure,
             color: const Color(0xFFB39DDB),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 2),
           _iconBtn(
             icon: Icons.opacity,
             tooltip: 'Add hydrogens',
@@ -1043,9 +1219,7 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
             color: const Color(0xFF80CBC4),
           ),
 
-          const SizedBox(width: 8),
-          _divider(),
-          const SizedBox(width: 8),
+          const SizedBox(width: 2),
 
           // ── Erase / Clear ──────────────────────────────────────────────
           _iconBtn(
@@ -1055,14 +1229,14 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
             onTap: () {
               if (_selectedAtomId == null) return;
               final a = _atoms.cast<Atom?>().firstWhere(
-                    (a) => a!.id == _selectedAtomId,
-                    orElse: () => null,
-                  );
+                (a) => a!.id == _selectedAtomId,
+                orElse: () => null,
+              );
               if (a != null) _eraseAtom(a);
             },
             color: const Color(0xFFE57373),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 2),
           _iconBtn(
             icon: Icons.delete_sweep_outlined,
             tooltip: 'Clear canvas',
@@ -1071,9 +1245,7 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
             color: const Color(0xFFE57373),
           ),
 
-          const SizedBox(width: 8),
-          _divider(),
-          const SizedBox(width: 8),
+          const SizedBox(width: 2),
 
           // ── Save / Load / Export ────────────────────────────────────────
           _iconBtn(
@@ -1083,16 +1255,15 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
             onTap: _showSaveDialog,
             color: const Color(0xFF81C784),
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 2),
           _iconBtn(
             icon: Icons.folder_open_outlined,
             tooltip: 'Saved molecules',
             enabled: true,
             onTap: () => setState(() => _showSavedPanel = !_showSavedPanel),
-            color:
-                _showSavedPanel ? const Color(0xFF00C8FF) : null,
+            color: _showSavedPanel ? const Color(0xFF00C8FF) : null,
           ),
-          const SizedBox(width: 4),
+          const SizedBox(width: 2),
           _iconBtn(
             icon: Icons.data_object_outlined,
             tooltip: 'Export SMILES',
@@ -1100,6 +1271,398 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
             onTap: _exportSmiles,
             color: const Color(0xFFFFD54F),
           ),
+        ],
+      ),
+    );
+  }
+
+  void _toggleRetrosynthesisPanel() {
+    if (_atoms.isEmpty) return;
+    setState(() {
+      _retrosynthesisExpanded = !_retrosynthesisExpanded;
+      if (_retrosynthesisExpanded) {
+        _retrosynthesisAnalysis = RetrosynthesisEngine.analyze(_atoms, _bonds);
+      } else {
+        _retrosynthesisAnalysis = null;
+      }
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _recenterMoleculeToCanvas();
+    });
+  }
+
+  void _recenterMoleculeToCanvas() {
+    if (_atoms.isEmpty) return;
+
+    final expandedMode = _retrosynthesisExpanded;
+    final desiredCenter = Offset(
+      _canvasSize.width > 0 ? _canvasSize.width / 2 : 400,
+      expandedMode
+          ? (_canvasSize.height > 0 ? _canvasSize.height * 0.25 : 180.0)
+          : (_canvasSize.height > 0 ? _canvasSize.height / 2 : 300.0),
+    );
+
+    double minX = double.infinity;
+    double minY = double.infinity;
+    double maxX = double.negativeInfinity;
+    double maxY = double.negativeInfinity;
+
+    for (final atom in _atoms) {
+      minX = min(minX, atom.position.dx);
+      minY = min(minY, atom.position.dy);
+      maxX = max(maxX, atom.position.dx);
+      maxY = max(maxY, atom.position.dy);
+    }
+
+    final currentBoundsCenter = Offset((minX + maxX) / 2, (minY + maxY) / 2);
+    final width = max(maxX - minX, 1.0);
+    final height = max(maxY - minY, 1.0);
+
+    final padding = 60.0;
+    final availableWidth = max(_canvasSize.width - padding, 120.0);
+    final availableHeight = max(
+      expandedMode
+          ? (_canvasSize.height * 0.5) - padding
+          : _canvasSize.height - padding,
+      120.0,
+    );
+    final fitScale = min(
+      availableWidth / width,
+      availableHeight / height,
+    ).clamp(0.12, 1.0);
+
+    setState(() {
+      for (final atom in _atoms) {
+        final relative = atom.position - currentBoundsCenter;
+        atom.position = desiredCenter + relative * fitScale;
+      }
+    });
+  }
+
+  Color _confidenceColor(double confidence) {
+    final clamped = confidence.clamp(0.0, 1.0);
+    if (clamped <= 0.5) {
+      return Color.lerp(
+        const Color(0xFFD32F2F),
+        const Color(0xFFFFEA00),
+        (clamped / 0.5).clamp(0.0, 1.0),
+      )!;
+    }
+    return Color.lerp(
+      const Color(0xFFFFEA00),
+      const Color(0xFF2E7D32),
+      ((clamped - 0.5) / 0.5).clamp(0.0, 1.0),
+    )!;
+  }
+
+  Color _routeColor(int index, double confidence) {
+    const palette = <Color>[
+      Color(0xFF66D9EF),
+      Color(0xFFB388FF),
+      Color(0xFFFFC857),
+      Color(0xFF7AE582),
+      Color(0xFFFF8A80),
+      Color(0xFF8DD9FF),
+    ];
+
+    final base = palette[index % palette.length];
+    final confidenceColor = _confidenceColor(confidence);
+    return Color.lerp(base, confidenceColor, 0.45) ?? base;
+  }
+
+  Color _functionalGroupPillColor(String functionalGroup) {
+    return RetrosynthesisDatabase.colorForFunctionalGroup(functionalGroup);
+  }
+
+  List<RetrosynthesisBreakMarker> _retrosynthesisBreakMarkers() {
+    if (_atoms.isEmpty || _bonds.isEmpty || !_retrosynthesisExpanded) {
+      return const [];
+    }
+
+    final analysis =
+        _retrosynthesisAnalysis ?? RetrosynthesisEngine.analyze(_atoms, _bonds);
+    final atomMap = {for (final atom in _atoms) atom.id: atom};
+    final List<RetrosynthesisBreakMarker> markers = [];
+
+    for (int stepIndex = 0; stepIndex < analysis.steps.length; stepIndex++) {
+      final step = analysis.steps[stepIndex];
+      final stepColor = _routeColor(stepIndex, step.confidence);
+
+      final List<Offset> candidatePoints = [];
+      for (final bond in _bonds) {
+        final from = atomMap[bond.fromId];
+        final to = atomMap[bond.toId];
+        if (from == null || to == null) continue;
+
+        final a = from.symbol;
+        final b = to.symbol;
+        final pair = [a, b];
+        final isAmideBond =
+            step.reaction.contains('amide') &&
+            (pair.contains('C') && pair.contains('N'));
+        final isEsterBond =
+            step.reaction.contains('ester') &&
+            (pair.contains('C') && pair.contains('O'));
+        final isAlcoholBond =
+            step.reaction.contains('alcohol') &&
+            (pair.contains('C') && pair.contains('O'));
+        final isFragmentBond =
+            step.reaction.contains('fragment') &&
+            (pair.contains('C') || pair.contains('N') || pair.contains('O'));
+
+        if (isAmideBond || isEsterBond || isAlcoholBond || isFragmentBond) {
+          candidatePoints.add((from.position + to.position) / 2);
+        }
+      }
+
+      if (candidatePoints.isEmpty && step.reaction.contains('fragment')) {
+        candidatePoints.addAll(
+          _bonds.map((bond) {
+            final from = atomMap[bond.fromId];
+            final to = atomMap[bond.toId];
+            if (from == null || to == null) return Offset.zero;
+            return (from.position + to.position) / 2;
+          }),
+        );
+      }
+
+      for (final point in candidatePoints) {
+        if (point != Offset.zero) {
+          markers.add(
+            RetrosynthesisBreakMarker(
+              point: point,
+              color: stepColor,
+              confidence: step.confidence,
+            ),
+          );
+        }
+      }
+    }
+
+    return markers;
+  }
+
+  List<FunctionalGroupMarker> _functionalGroupMarkers() {
+    if (_atoms.isEmpty || !_showFunctionalGroups) {
+      return const [];
+    }
+    return RetrosynthesisEngine.detectGroupMarkers(_atoms, _bonds);
+  }
+
+  Widget _buildRetrosynthesisPanel(BuildContext context) {
+    final analysis =
+        _retrosynthesisAnalysis ?? RetrosynthesisEngine.analyze(_atoms, _bonds);
+    final viewportHeight = MediaQuery.sizeOf(context).height;
+    final height = _retrosynthesisExpanded
+        ? (viewportHeight * 0.5).clamp(220.0, viewportHeight * 0.7)
+        : 50.0;
+    final bodyHeight = _retrosynthesisExpanded ? height - 52.0 : 0.0;
+
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeInOut,
+      height: height,
+      width: double.infinity,
+      constraints: const BoxConstraints(minHeight: 0),
+      decoration: BoxDecoration(
+        color: _panelBackground,
+        border: Border(top: BorderSide(color: _panelBorder)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          InkWell(
+            onTap: _atoms.isNotEmpty ? _toggleRetrosynthesisPanel : null,
+            child: SizedBox(
+              height: 49,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.science_outlined,
+                      size: 15,
+                      color: _isDarkTheme
+                          ? const Color(0xFFCE93D8)
+                          : const Color(0xFF7C3AED),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Retrosynthesis analysis',
+                      style: TextStyle(
+                        color: _isDarkTheme
+                            ? const Color(0xFFEAEAEA)
+                            : const Color(0xFF1F2937),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const Spacer(),
+                    Icon(
+                      _retrosynthesisExpanded
+                          ? Icons.keyboard_arrow_down_rounded
+                          : Icons.keyboard_arrow_up_rounded,
+                      color: _isDarkTheme
+                          ? const Color(0xFF888888)
+                          : const Color(0xFF64748B),
+                      size: 16,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          if (_retrosynthesisExpanded)
+            SizedBox(
+              height: bodyHeight,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (_showFunctionalGroups &&
+                          analysis.functionalGroups.isNotEmpty)
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: analysis.functionalGroups.map((fg) {
+                            final color = _functionalGroupPillColor(fg);
+                            return Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 10,
+                                vertical: 6,
+                              ),
+                              decoration: BoxDecoration(
+                                color: color.withValues(alpha: 0.12),
+                                border: Border.all(
+                                  color: color.withValues(alpha: 0.7),
+                                ),
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Text(
+                                fg,
+                                style: TextStyle(
+                                  color: color,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      if (analysis.steps.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        for (int i = 0; i < analysis.steps.length; i++)
+                          Container(
+                            width: double.infinity,
+                            margin: EdgeInsets.only(top: i == 0 ? 0 : 8),
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: _isDarkTheme
+                                  ? const Color(0xFF151515)
+                                  : const Color(0xFFF8FAFC),
+                              border: Border.all(
+                                color: _routeColor(
+                                  i,
+                                  analysis.steps[i].confidence,
+                                ),
+                              ),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        i == 0
+                                            ? 'Top suggestion'
+                                            : 'Alternative route ${i + 1}',
+                                        style: TextStyle(
+                                          color: _routeColor(
+                                            i,
+                                            analysis.steps[i].confidence,
+                                          ),
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: 0.8,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      '${(analysis.steps[i].confidence * 100).round()}%',
+                                      style: TextStyle(
+                                        color: _confidenceColor(
+                                          analysis.steps[i].confidence,
+                                        ),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  analysis.steps[i].reaction,
+                                  style: TextStyle(
+                                    color: _routeColor(
+                                      i,
+                                      analysis.steps[i].confidence,
+                                    ),
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  analysis.steps[i].description,
+                                  style: TextStyle(
+                                    color: _isDarkTheme
+                                        ? const Color(0xFFDADADA)
+                                        : const Color(0xFF344054),
+                                    fontSize: 11,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                _retrosynthesisInfoRow(
+                                  'Precursors',
+                                  analysis.steps[i].precursors.join(', '),
+                                ),
+                                const SizedBox(height: 4),
+                                _retrosynthesisInfoRow(
+                                  'Reagents',
+                                  analysis.steps[i].reagents.join(', '),
+                                ),
+                                const SizedBox(height: 4),
+                                _retrosynthesisInfoRow(
+                                  'Break point',
+                                  analysis.steps[i].breakPoints.join(', '),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ] else
+                        Padding(
+                          padding: const EdgeInsets.only(top: 10),
+                          child: Text(
+                            'No confident disconnection rule matched this structure.',
+                            style: TextStyle(
+                              color: _isDarkTheme
+                                  ? const Color(0xFFB0B0B0)
+                                  : const Color(0xFF475467),
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -1139,32 +1702,6 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
     );
   }
 
-  Widget _floatingChargeBtn(String label, int delta) {
-    final color = delta > 0 ? const Color(0xFF64B5F6) : const Color(0xFFEF5350);
-    return InkWell(
-      onTap: () => _changeCharge(delta),
-      borderRadius: BorderRadius.circular(6),
-      child: Container(
-        width: 28,
-        height: 28,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: const Color(0xFF1E1E1E),
-          border: Border.all(color: const Color(0xFF2E2E2E)),
-          borderRadius: BorderRadius.circular(6),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: color,
-            fontSize: 15,
-            fontWeight: FontWeight.bold,
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _iconBtn({
     required IconData icon,
     required String tooltip,
@@ -1172,8 +1709,9 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
     required VoidCallback onTap,
     Color? color,
   }) {
-    final c =
-        enabled ? (color ?? const Color(0xFF888888)) : const Color(0xFF2A2A2A);
+    final c = enabled
+        ? (color ?? const Color(0xFF888888))
+        : const Color(0xFF2A2A2A);
     return Tooltip(
       message: tooltip,
       waitDuration: const Duration(milliseconds: 400),
@@ -1182,8 +1720,8 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
         borderRadius: BorderRadius.circular(6),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 120),
-          width: 32,
-          height: 32,
+          width: 25,
+          height: 25,
           alignment: Alignment.center,
           decoration: BoxDecoration(
             color: enabled && color != null
@@ -1218,21 +1756,25 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
           ),
           borderRadius: BorderRadius.circular(6),
         ),
-        child: Row(children: [
-          Icon(icon,
-              color: active
-                  ? const Color(0xFF00C8FF)
-                  : const Color(0xFF555555),
-              size: 14),
-          const SizedBox(width: 4),
-          Text(label,
+        child: Row(
+          children: [
+            Icon(
+              icon,
+              color: active ? const Color(0xFF00C8FF) : const Color(0xFF555555),
+              size: 14,
+            ),
+            /* const SizedBox(width: 4),
+            Text(
+              label,
               style: TextStyle(
                 color: active
                     ? const Color(0xFF00C8FF)
                     : const Color(0xFF555555),
                 fontSize: 11,
-              )),
-        ]),
+              ),
+            ), */
+          ],
+        ),
       ),
     );
   }
@@ -1252,18 +1794,20 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
               ? const Color(0xFF00C8FF).withValues(alpha: 0.15)
               : Colors.transparent,
           border: Border.all(
-            color: active ? const Color(0xFF00C8FF) : const Color(0xFF2A2A2A),
+            color: active
+                ? const Color(0xFF00C8FF)
+                : const Color.fromARGB(7, 42, 42, 42),
           ),
           borderRadius: BorderRadius.circular(4),
         ),
-        child: Text(label,
-            style: TextStyle(
-              color: active
-                  ? const Color(0xFF00C8FF)
-                  : const Color(0xFF555555),
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-            )),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: active ? const Color(0xFF00C8FF) : const Color(0xFF555555),
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
       ),
     );
   }
@@ -1274,24 +1818,155 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
 
   Widget _buildPalette() {
     return Container(
-      width: 60,
-      decoration: const BoxDecoration(
-        color: Color(0xFF111111),
-        border: Border(right: BorderSide(color: Color(0xFF1C1C1C))),
+      width: 50,
+      decoration: BoxDecoration(
+        color: _panelBackground,
+        border: Border(right: BorderSide(color: _panelBorder)),
       ),
       child: ListView(
-        padding: const EdgeInsets.symmetric(vertical: 12),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
         children: [
+          if (_mode == 'draw' && _selectedFragment == null) ...[
+            _bondChip('–', BondType.single),
+            const SizedBox(width: 4),
+            _bondChip('=', BondType.double),
+            const SizedBox(width: 4),
+            _bondChip('≡', BondType.triple),
+          ],
           ...kAtomPalette.map((e) => _atomTile(e)),
           const SizedBox(height: 12),
           ..._fragments.map((f) => _fragmentTile(f)),
+          const SizedBox(height: 10),
+          Divider(color: const Color(0xFF1C1C1C), height: 1, thickness: 1),
+          const SizedBox(height: 10),
+          Container(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Text(
+                  'FGs',
+                  style: TextStyle(
+                    color: _mutedText,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Transform.scale(
+                  scale: 0.75,
+                  child: Switch.adaptive(
+                    value: _showFunctionalGroups,
+                    activeThumbColor: const Color(0xFF8DD9FF),
+                    activeTrackColor: const Color(
+                      0xFF8DD9FF,
+                    ).withValues(alpha: 0.35),
+                    onChanged: (value) {
+                      setState(() => _showFunctionalGroups = value);
+                    },
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Theme',
+                  style: TextStyle(
+                    color: _mutedText,
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                GestureDetector(
+                  onTap: () => widget.onThemeChanged?.call(
+                    widget.themeMode != ThemeMode.dark,
+                  ),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeInOut,
+                    width: 42,
+                    height: 22,
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(999),
+                      color: widget.themeMode == ThemeMode.dark
+                          ? const Color(0xFF1D2430)
+                          : const Color(0xFFF6D365),
+                      border: Border.all(
+                        color: widget.themeMode == ThemeMode.dark
+                            ? const Color(0xFF3A4A5C)
+                            : const Color(0xFFE7B93B),
+                      ),
+                    ),
+                    child: Stack(
+                      children: [
+                        Align(
+                          alignment: widget.themeMode == ThemeMode.dark
+                              ? Alignment.centerLeft
+                              : Alignment.centerRight,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 180),
+                            curve: Curves.easeInOut,
+                            width: 16,
+                            height: 16,
+                            decoration: BoxDecoration(
+                              color: widget.themeMode == ThemeMode.dark
+                                  ? const Color(0xFF8DD9FF)
+                                  : const Color(0xFFFFF7D6),
+                              borderRadius: BorderRadius.circular(999),
+                              boxShadow: [
+                                BoxShadow(
+                                  color:
+                                      (widget.themeMode == ThemeMode.dark
+                                              ? const Color(0xFF8DD9FF)
+                                              : const Color(0xFFFFC857))
+                                          .withValues(alpha: 0.45),
+                                  blurRadius: 6,
+                                  spreadRadius: 1,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          left: 4,
+                          top: 3,
+                          child: Icon(
+                            Icons.dark_mode_rounded,
+                            size: 10,
+                            color: widget.themeMode == ThemeMode.dark
+                                ? const Color(0xFFBFE9FF)
+                                : const Color(0xFF7A5C00),
+                          ),
+                        ),
+                        Positioned(
+                          right: 4,
+                          top: 3,
+                          child: Icon(
+                            Icons.light_mode_rounded,
+                            size: 10,
+                            color: widget.themeMode == ThemeMode.dark
+                                ? const Color(0xFF68758A)
+                                : const Color(0xFFFFF6D6),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _atomTile(AtomEntry entry) {
-    final isSelected = _selectedFragment == null &&
+    final isSelected =
+        _selectedFragment == null &&
         _selectedAtomSymbol == entry.symbol &&
         _mode == 'draw';
     return GestureDetector(
@@ -1305,8 +1980,8 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
       }),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 150),
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        height: 36,
+        margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 2),
+        height: 25,
         decoration: BoxDecoration(
           color: isSelected
               ? entry.color.withValues(alpha: 0.12)
@@ -1319,20 +1994,21 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
           borderRadius: BorderRadius.circular(6),
         ),
         child: Center(
-          child: Text(entry.symbol,
-              style: TextStyle(
-                color: entry.color,
-                fontSize: entry.symbol.length > 1 ? 11 : 13,
-                fontWeight: FontWeight.w600,
-              )),
+          child: Text(
+            entry.symbol,
+            style: TextStyle(
+              color: entry.color,
+              fontSize: entry.symbol.length > 1 ? 11 : 13,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ),
       ),
     );
   }
 
   Widget _fragmentTile(MoleculeFragment frag) {
-    final isSelected =
-        _selectedFragment?.name == frag.name && _mode == 'draw';
+    final isSelected = _selectedFragment?.name == frag.name && _mode == 'draw';
     return GestureDetector(
       onTap: () => setState(() {
         _selectedFragment = frag;
@@ -1356,14 +2032,16 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
           borderRadius: BorderRadius.circular(6),
         ),
         child: Center(
-          child: Text(frag.displayLabel,
-              style: TextStyle(
-                color: isSelected
-                    ? const Color(0xFF00C8FF)
-                    : const Color(0xFF555555),
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-              )),
+          child: Text(
+            frag.displayLabel,
+            style: TextStyle(
+              color: isSelected
+                  ? const Color(0xFF00C8FF)
+                  : const Color(0xFF555555),
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
         ),
       ),
     );
@@ -1374,11 +2052,21 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
   // ═══════════════════════════════════════════════════════════════════════════
 
   Widget _buildSavedPanel() {
+    final headerColor = _isDarkTheme
+        ? const Color(0xFF555555)
+        : const Color(0xFF64748B);
+    final emptyColor = _isDarkTheme
+        ? const Color(0xFF333333)
+        : const Color(0xFF475467);
+    final closeColor = _isDarkTheme
+        ? const Color(0xFF444444)
+        : const Color(0xFF667085);
+
     return Container(
       width: 220,
-      decoration: const BoxDecoration(
-        color: Color(0xFF111111),
-        border: Border(left: BorderSide(color: Color(0xFF1C1C1C))),
+      decoration: BoxDecoration(
+        color: _panelBackground,
+        border: Border(left: BorderSide(color: _panelBorder)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1386,24 +2074,24 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
           // Header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            decoration: const BoxDecoration(
-              border:
-                  Border(bottom: BorderSide(color: Color(0xFF1C1C1C))),
+            decoration: BoxDecoration(
+              border: Border(bottom: BorderSide(color: _panelBorder)),
             ),
             child: Row(
               children: [
-                const Text('SAVED',
-                    style: TextStyle(
-                        color: Color(0xFF555555),
-                        fontSize: 9,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.5)),
+                Text(
+                  'SAVED',
+                  style: TextStyle(
+                    color: headerColor,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.5,
+                  ),
+                ),
                 const Spacer(),
                 InkWell(
-                  onTap: () =>
-                      setState(() => _showSavedPanel = false),
-                  child: const Icon(Icons.close,
-                      size: 14, color: Color(0xFF444444)),
+                  onTap: () => setState(() => _showSavedPanel = false),
+                  child: Icon(Icons.close, size: 14, color: closeColor),
                 ),
               ],
             ),
@@ -1411,19 +2099,19 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
           // List
           Expanded(
             child: _savedMolecules.isEmpty
-                ? const Center(
+                ? Center(
                     child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Text('No saved molecules',
-                          style: TextStyle(
-                              color: Color(0xFF333333), fontSize: 11)),
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'No saved molecules',
+                        style: TextStyle(color: emptyColor, fontSize: 11),
+                      ),
                     ),
                   )
                 : ListView.builder(
                     padding: const EdgeInsets.symmetric(vertical: 6),
                     itemCount: _savedMolecules.length,
-                    itemBuilder: (_, i) =>
-                        _savedTile(_savedMolecules[i]),
+                    itemBuilder: (_, i) => _savedTile(_savedMolecules[i]),
                   ),
           ),
         ],
@@ -1437,6 +2125,21 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
     final timeStr = dt != null
         ? '${dt.day}/${dt.month}/${dt.year}  ${dt.hour.toString().padLeft(2, '0')}:${dt.minute.toString().padLeft(2, '0')}'
         : '';
+    final cardColor = _isDarkTheme
+        ? const Color(0xFF161616)
+        : const Color(0xFFFFFFFF);
+    final cardBorder = _isDarkTheme
+        ? const Color(0xFF1E1E1E)
+        : const Color(0xFFD5DCE7);
+    final nameColor = _isDarkTheme
+        ? const Color(0xFFCCCCCC)
+        : const Color(0xFF1F2937);
+    final timestampColor = _isDarkTheme
+        ? const Color(0xFF333333)
+        : const Color(0xFF667085);
+    final closeColor = _isDarkTheme
+        ? const Color(0xFF444444)
+        : const Color(0xFF667085);
 
     return InkWell(
       onTap: () => _loadMolecule(mol),
@@ -1444,8 +2147,8 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: const Color(0xFF161616),
-          border: Border.all(color: const Color(0xFF1E1E1E)),
+          color: cardColor,
+          border: Border.all(color: cardBorder),
           borderRadius: BorderRadius.circular(6),
         ),
         child: Column(
@@ -1454,34 +2157,37 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
             Row(
               children: [
                 Expanded(
-                  child: Text(mol.name,
-                      style: const TextStyle(
-                          color: Color(0xFFCCCCCC),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600),
-                      overflow: TextOverflow.ellipsis),
+                  child: Text(
+                    mol.name,
+                    style: TextStyle(
+                      color: nameColor,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
                 InkWell(
                   onTap: () => _deleteSaved(mol),
-                  child: const Icon(Icons.close,
-                      size: 12, color: Color(0xFF444444)),
+                  child: Icon(Icons.close, size: 12, color: closeColor),
                 ),
               ],
             ),
             const SizedBox(height: 4),
             Text(
               smiles.isEmpty ? '(empty)' : smiles,
-              style: const TextStyle(
-                  color: Color(0xFF00C8FF),
-                  fontSize: 9,
-                  fontFamily: 'monospace'),
+              style: TextStyle(
+                color: _isDarkTheme
+                    ? const Color(0xFF00C8FF)
+                    : const Color(0xFF2563EB),
+                fontSize: 9,
+                fontFamily: 'monospace',
+              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
             const SizedBox(height: 2),
-            Text(timeStr,
-                style: const TextStyle(
-                    color: Color(0xFF333333), fontSize: 8)),
+            Text(timeStr, style: TextStyle(color: timestampColor, fontSize: 8)),
           ],
         ),
       ),
@@ -1493,172 +2199,122 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
   // ═══════════════════════════════════════════════════════════════════════════
 
   Widget _buildCanvas() {
-    return Listener(
-      onPointerMove: _onPointerMove,
-      child: GestureDetector(
-        onTapDown: _onTapDown,
-        onPanStart: _onPanStart,
-        onPanUpdate: _onPanUpdate,
-        onPanEnd: _onPanEnd,
-        child: Container(
-          color: const Color(0xFF0D0D0D),
-          child: Stack(
-            children: [
-              // Dot-grid
-              CustomPaint(painter: _GridPainter(), child: Container()),
-              // Molecule
-              CustomPaint(
-                painter: MoleculeCanvasPainter(
-                  atoms: _atoms,
-                  bonds: _bonds,
-                  selectedAtomId: _selectedAtomId,
-                  hoveredAtomId: _hoveredAtomId,
-                  previewLineEnd: _previewEnd,
-                ),
-                child: Container(),
-              ),
-              // Empty-canvas hint
-              if (_atoms.isEmpty)
-                Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.science_outlined,
-                          color: const Color(0xFF1E1E1E), size: 48),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Select an atom or group\nthen click to place',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                            color: Color(0xFF252525), fontSize: 13),
-                      ),
-                    ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        _canvasSize = constraints.biggest;
+        return Listener(
+          onPointerMove: _onPointerMove,
+          child: GestureDetector(
+            onTapDown: _onTapDown,
+            onPanStart: _onPanStart,
+            onPanUpdate: _onPanUpdate,
+            onPanEnd: _onPanEnd,
+            child: Container(
+              color: _canvasBackground,
+              child: Stack(
+                children: [
+                  // Dot-grid
+                  CustomPaint(
+                    painter: _GridPainter(isDark: _isDarkTheme),
+                    child: Container(),
                   ),
-                ),
-              // Bond-mode toast
-              if (_selectedAtomId != null)
-                Positioned(
-                  bottom: 16,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF001820),
-                        border: Border.all(color: const Color(0xFF004050)),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Text(
-                        'Click another atom to bond · Click empty space to cancel',
-                        style: TextStyle(
-                            color: Color(0xFF00C8FF), fontSize: 11),
-                      ),
+                  // Molecule
+                  CustomPaint(
+                    painter: MoleculeCanvasPainter(
+                      atoms: _atoms,
+                      bonds: _bonds,
+                      selectedAtomId: _selectedAtomId,
+                      hoveredAtomId: _hoveredAtomId,
+                      previewLineEnd: _previewEnd,
+                      isDarkTheme: _isDarkTheme,
+                      retrosynthesisBreakMarkers: _retrosynthesisBreakMarkers(),
+                      functionalGroupMarkers: _functionalGroupMarkers(),
                     ),
+                    child: Container(),
                   ),
-                ),
-              // Erase-mode hint
-              if (_mode == 'erase')
-                Positioned(
-                  bottom: 16,
-                  left: 0,
-                  right: 0,
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1A0000),
-                        border: Border.all(color: const Color(0xFF500000)),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Text(
-                        'Click an atom to erase it',
-                        style: TextStyle(
-                            color: Color(0xFFE57373), fontSize: 11),
-                      ),
-                    ),
-                  ),
-                ),
-              // Selected Atom Details & Charge adjustment card
-              if (_selectedAtomId != null)
-                Positioned(
-                  bottom: 56,
-                  left: 16,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF161616),
-                      border: Border.all(color: const Color(0xFF2A2A2A)),
-                      borderRadius: BorderRadius.circular(8),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.4),
-                          blurRadius: 8,
-                          offset: const Offset(0, 4),
-                        )
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 24,
-                          height: 24,
-                          decoration: BoxDecoration(
-                            color: _atoms.firstWhere((a) => a.id == _selectedAtomId).color.withValues(alpha: 0.1),
-                            border: Border.all(
-                              color: _atoms.firstWhere((a) => a.id == _selectedAtomId).color.withValues(alpha: 0.5),
-                            ),
-                            shape: BoxShape.circle,
+                  // Empty-canvas hint
+                  if (_atoms.isEmpty)
+                    Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.science_outlined,
+                            color: const Color(0xFF1E1E1E),
+                            size: 48,
                           ),
-                          alignment: Alignment.center,
-                          child: Text(
-                            _atoms.firstWhere((a) => a.id == _selectedAtomId).symbol,
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Select an atom or group\nthen click to place',
+                            textAlign: TextAlign.center,
                             style: TextStyle(
-                              color: _atoms.firstWhere((a) => a.id == _selectedAtomId).color,
+                              color: Color(0xFF252525),
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  // Bond-mode toast
+                  if (_selectedAtomId != null)
+                    Positioned(
+                      bottom: 16,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF001820),
+                            border: Border.all(color: const Color(0xFF004050)),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Text(
+                            'Click another atom to bond · Click empty space to cancel',
+                            style: TextStyle(
+                              color: Color(0xFF00C8FF),
                               fontSize: 11,
-                              fontWeight: FontWeight.bold,
                             ),
                           ),
                         ),
-                        const SizedBox(width: 10),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              'Atom ${_atoms.firstWhere((a) => a.id == _selectedAtomId).symbol}',
-                              style: const TextStyle(
-                                color: Color(0xFFCCCCCC),
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            Text(
-                              'Formal Charge: ${_atoms.firstWhere((a) => a.id == _selectedAtomId).charge > 0 ? '+' : ''}${_atoms.firstWhere((a) => a.id == _selectedAtomId).charge}',
-                              style: const TextStyle(
-                                color: Color(0xFF888888),
-                                fontSize: 10,
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(width: 16),
-                        _divider(),
-                        const SizedBox(width: 12),
-                        _floatingChargeBtn('−', -1),
-                        const SizedBox(width: 6),
-                        _floatingChargeBtn('+', 1),
-                      ],
+                      ),
                     ),
-                  ),
-                ),
-            ],
+                  // Erase-mode hint
+                  if (_mode == 'erase')
+                    Positioned(
+                      bottom: 16,
+                      left: 0,
+                      right: 0,
+                      child: Center(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 6,
+                          ),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1A0000),
+                            border: Border.all(color: const Color(0xFF500000)),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Text(
+                            'Click an atom to erase it',
+                            style: TextStyle(
+                              color: Color(0xFFE57373),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
           ),
-        ),
-      ),
+        );
+      },
     );
   }
 }
@@ -1666,9 +2322,14 @@ class _MoleculeEditorScreenState extends State<MoleculeEditorScreen>
 // ─── Dot-grid background ──────────────────────────────────────────────────────
 
 class _GridPainter extends CustomPainter {
+  final bool isDark;
+
+  const _GridPainter({required this.isDark});
+
   @override
   void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = const Color(0xFF1A1A1A);
+    final paint = Paint()
+      ..color = isDark ? const Color(0xFF1A1A1A) : const Color(0xFFD9DEE6);
     const spacing = 28.0;
     for (double x = 0; x < size.width; x += spacing) {
       for (double y = 0; y < size.height; y += spacing) {
@@ -1678,5 +2339,5 @@ class _GridPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_GridPainter old) => false;
+  bool shouldRepaint(_GridPainter old) => old.isDark != isDark;
 }

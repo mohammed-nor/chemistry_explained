@@ -36,24 +36,21 @@ class Atom {
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'symbol': symbol,
-        'x': position.dx,
-        'y': position.dy,
-        'color': color.toARGB32(),
-        'charge': charge,
-      };
+    'id': id,
+    'symbol': symbol,
+    'x': position.dx,
+    'y': position.dy,
+    'color': color.toARGB32(),
+    'charge': charge,
+  };
 
   factory Atom.fromJson(Map<String, dynamic> j) => Atom(
-        id: j['id'] as String,
-        symbol: j['symbol'] as String,
-        position: Offset(
-          (j['x'] as num).toDouble(),
-          (j['y'] as num).toDouble(),
-        ),
-        color: Color(j['color'] as int),
-        charge: (j['charge'] as int?) ?? 0,
-      );
+    id: j['id'] as String,
+    symbol: j['symbol'] as String,
+    position: Offset((j['x'] as num).toDouble(), (j['y'] as num).toDouble()),
+    color: Color(j['color'] as int),
+    charge: (j['charge'] as int?) ?? 0,
+  );
 }
 
 // ─── Bond ────────────────────────────────────────────────────────────────────
@@ -72,18 +69,18 @@ class Bond {
   });
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'fromId': fromId,
-        'toId': toId,
-        'type': type.index,
-      };
+    'id': id,
+    'fromId': fromId,
+    'toId': toId,
+    'type': type.index,
+  };
 
   factory Bond.fromJson(Map<String, dynamic> j) => Bond(
-        id: j['id'] as String,
-        fromId: j['fromId'] as String,
-        toId: j['toId'] as String,
-        type: BondType.values[j['type'] as int],
-      );
+    id: j['id'] as String,
+    fromId: j['fromId'] as String,
+    toId: j['toId'] as String,
+    type: BondType.values[j['type'] as int],
+  );
 }
 
 // ─── Saved molecule ──────────────────────────────────────────────────────────
@@ -104,24 +101,117 @@ class SavedMolecule {
   });
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-        'timestamp': timestamp,
-        'nextId': nextId,
-        'atoms': atoms.map((a) => a.toJson()).toList(),
-        'bonds': bonds.map((b) => b.toJson()).toList(),
-      };
+    'name': name,
+    'timestamp': timestamp,
+    'nextId': nextId,
+    'atoms': atoms.map((a) => a.toJson()).toList(),
+    'bonds': bonds.map((b) => b.toJson()).toList(),
+  };
 
   factory SavedMolecule.fromJson(Map<String, dynamic> j) => SavedMolecule(
-        name: j['name'] as String,
-        timestamp: j['timestamp'] as String,
-        nextId: (j['nextId'] as int?) ?? 0,
-        atoms: (j['atoms'] as List).map((a) => Atom.fromJson(a)).toList(),
-        bonds: (j['bonds'] as List).map((b) => Bond.fromJson(b)).toList(),
-      );
+    name: j['name'] as String,
+    timestamp: j['timestamp'] as String,
+    nextId: (j['nextId'] as int?) ?? 0,
+    atoms: (j['atoms'] as List).map((a) => Atom.fromJson(a)).toList(),
+    bonds: (j['bonds'] as List).map((b) => Bond.fromJson(b)).toList(),
+  );
 
   String encode() => jsonEncode(toJson());
   static SavedMolecule decode(String s) =>
       SavedMolecule.fromJson(jsonDecode(s) as Map<String, dynamic>);
+
+  static SavedMolecule paracetamolDemo() {
+    final atoms = <Atom>[
+      Atom(
+        id: 'p0',
+        symbol: 'C',
+        position: const Offset(-80, 0),
+        color: Colors.white,
+      ),
+      Atom(
+        id: 'p1',
+        symbol: 'C',
+        position: const Offset(-40, -70),
+        color: Colors.white,
+      ),
+      Atom(
+        id: 'p2',
+        symbol: 'C',
+        position: const Offset(40, -70),
+        color: Colors.white,
+      ),
+      Atom(
+        id: 'p3',
+        symbol: 'C',
+        position: const Offset(80, 0),
+        color: Colors.white,
+      ),
+      Atom(
+        id: 'p4',
+        symbol: 'C',
+        position: const Offset(40, 70),
+        color: Colors.white,
+      ),
+      Atom(
+        id: 'p5',
+        symbol: 'C',
+        position: const Offset(-40, 70),
+        color: Colors.white,
+      ),
+      Atom(
+        id: 'p6',
+        symbol: 'O',
+        position: const Offset(-120, 0),
+        color: Colors.red,
+      ),
+      Atom(
+        id: 'p7',
+        symbol: 'N',
+        position: const Offset(120, 0),
+        color: Colors.blue,
+      ),
+      Atom(
+        id: 'p8',
+        symbol: 'C',
+        position: const Offset(160, -40),
+        color: Colors.white,
+      ),
+      Atom(
+        id: 'p9',
+        symbol: 'O',
+        position: const Offset(200, -40),
+        color: Colors.red,
+      ),
+      Atom(
+        id: 'p10',
+        symbol: 'C',
+        position: const Offset(160, 40),
+        color: Colors.white,
+      ),
+    ];
+
+    final bonds = <Bond>[
+      Bond(id: 'pb0', fromId: 'p0', toId: 'p1', type: BondType.single),
+      Bond(id: 'pb1', fromId: 'p1', toId: 'p2', type: BondType.double),
+      Bond(id: 'pb2', fromId: 'p2', toId: 'p3', type: BondType.single),
+      Bond(id: 'pb3', fromId: 'p3', toId: 'p4', type: BondType.double),
+      Bond(id: 'pb4', fromId: 'p4', toId: 'p5', type: BondType.single),
+      Bond(id: 'pb5', fromId: 'p5', toId: 'p0', type: BondType.double),
+      Bond(id: 'pb6', fromId: 'p0', toId: 'p6', type: BondType.single),
+      Bond(id: 'pb7', fromId: 'p3', toId: 'p7', type: BondType.single),
+      Bond(id: 'pb8', fromId: 'p7', toId: 'p8', type: BondType.single),
+      Bond(id: 'pb9', fromId: 'p8', toId: 'p9', type: BondType.double),
+      Bond(id: 'pb10', fromId: 'p8', toId: 'p10', type: BondType.single),
+    ];
+
+    return SavedMolecule(
+      name: 'Paracetamol',
+      timestamp: DateTime.now().toIso8601String(),
+      atoms: atoms,
+      bonds: bonds,
+      nextId: 11,
+    );
+  }
 }
 
 // ─── SMILES generator ────────────────────────────────────────────────────────
@@ -403,7 +493,10 @@ List<MoleculeFragment> buildFragments() {
   ];
   final carboxylBonds = [
     const FragmentBond(
-        fromLocalId: 'c0', toLocalId: 'o0', type: BondType.double),
+      fromLocalId: 'c0',
+      toLocalId: 'o0',
+      type: BondType.double,
+    ),
     const FragmentBond(fromLocalId: 'c0', toLocalId: 'o1'),
     const FragmentBond(fromLocalId: 'o1', toLocalId: 'h0'),
   ];
